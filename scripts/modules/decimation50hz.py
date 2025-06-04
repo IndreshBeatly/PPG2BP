@@ -1,61 +1,66 @@
+# downsample the result from 500hz to 50hz and save as a new .npz file 
 #!/usr/bin/env python3
 import argparse
 import numpy as np
-from scipy.signal import butter, filtfilt
-
-def lowpass_filter(x: np.ndarray, cutoff_hz: float, fs: float, order: int = 4) -> np.ndarray:
-    """
-    Zero‐phase low‐pass filter: attenuate all frequencies above 'cutoff_hz'.
-    """
-    nyq = fs / 2
-    b, a = butter(order, cutoff_hz / nyq, btype="lowpass")
-    return filtfilt(b, a, x)
 
 def downsample_to_50hz(input_path: str, output_path: str) -> None:
     """
-    1) Load 'ppg', 'abp', 'fs' from input_path (.npz),
-    2) Low‐pass both at cutoff ~15 Hz to remove >25 Hz content,
-    3) Decimate by taking every 10th sample (500 -> 50 Hz),
-    4) Save as new .npz with fs=50.0.
+    Load 'ppg', 'abp', and 'fs' from input_path (.npz),
+    downsample both signals from 500 Hz to 50 Hz by taking every 10th sample,
+    and save the downsampled arrays (plus 'fs'=50) into output_path (.npz).
     """
     data = np.load(input_path)
-    ppg = data["ppg"]
-    abp = data["abp"]
-    fs  = float(data["fs"])
+    ppg = data["ppg"]       # shape: (L,)
+    abp = data["abp"]       # shape: (L,)
+    fs = float(data["fs"])  # sampling frequency, expected 500.0
 
     if ppg.shape != abp.shape:
         raise ValueError("'ppg' and 'abp' must have the same shape.")
+
     if int(fs) != 500:
-        raise ValueError(f"Expected original fs=500 Hz, but got fs={fs}.")
+        raise ValueError(
+            f"Expected original fs=500 Hz, but got fs={fs}."
+        )
 
-    # 1) Anti‐alias via low‐pass (zero‐phase) at 15 Hz
-    ppg_filt = lowpass_filter(ppg, cutoff_hz=15.0, fs=fs, order=4)
-    abp_filt = lowpass_filter(abp, cutoff_hz=15.0, fs=fs, order=4)
+    # Compute downsampling factor
+    target_fs = 50
+    factor = int(fs // target_fs)
+    if fs / factor != target_fs:
+        raise ValueError(
+            f"Downsampling factor must be an integer. Got fs={fs}, "
+            f"target_fs={target_fs}, fs/factor={fs/factor}."
+        )
 
-    # 2) Downsample by integer factor 10
-    ppg_ds = ppg_filt[::10]
-    abp_ds = abp_filt[::10]
+    # Use slicing to take every 'factor'-th sample (view, memory-efficient)
+    ppg_ds = ppg[::factor]
+    abp_ds = abp[::factor]
 
-    # 3) Save new 50 Hz file
+    # Release memory of the originals
+    del ppg, abp, data
+
+    # Save the downsampled signals with new fs
     np.savez_compressed(
         output_path,
-        ppg = ppg_ds,
-        abp = abp_ds,
-        fs  = float(50.0)
+        ppg=ppg_ds,
+        abp=abp_ds,
+        fs=float(target_fs)
     )
-    print(f"Saved downsampled signals to '{output_path}'.")
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Downsample PPG/ABP from 500 Hz to 50 Hz (with low‐pass)."
+        description="Downsample PPG/ABP from 500 Hz to 50 Hz in a .npz file."
     )
     parser.add_argument(
         "input_npz",
-        help="Path to the cleaned .npz (must contain 'ppg','abp','fs=500')."
+        help="Path to the cleaned .npz (containing 'ppg', 'abp', and 'fs=500')."
     )
     parser.add_argument(
         "output_npz",
-        help="Where to save the downsampled .npz (ppg,abp at 50 Hz + 'fs')."
+        help="Path where the downsampled .npz (fs=50) will be saved."
     )
     args = parser.parse_args()
     downsample_to_50hz(args.input_npz, args.output_npz)
+    print(f"Saved downsampled signals to '{args.output_npz}'.")
+
+
+#chmod +x downsample_to_50hz.py
+#./downsample_to_50hz.py cleaned_file.npz downsampled_file.npz
