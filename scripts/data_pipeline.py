@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 import os
 import argparse
+import shutil                     # ← Added
 import numpy as np
 import pandas as pd
 
-from modules.strip_time       import strip_times
-from modules.nan_removal      import remove_nans
-from modules.decimation50hz   import downsample_to_50hz
-from modules.tensec_window_split import select_top_windows_with_snr
-from modules.bp_labels        import sbp_dbp_labels
-from modules.normalise import filter_ppg_file  # the module that does band-pass + normalize
+from modules.strip_time            import strip_times
+from modules.nan_removal           import remove_nans
+from modules.decimation50hz        import downsample_to_50hz
+from modules.tensec_window_split   import select_top_windows_with_snr
+from modules.bp_labels             import sbp_dbp_labels
+from modules.normalise             import filter_ppg_file  # band‐pass + normalize
 
 INPUT_ROOT    = "data/raw_api"
 OUTPUT_ROOT   = "data/final"
@@ -36,6 +37,7 @@ def run_pipeline_for_patient(patient_id: str, metadata_df: pd.DataFrame):
     Run the full pipeline steps 1–6 for one patient. If Step 4
     (select_top_windows_with_snr) returns False → drop patient.
     Otherwise, merge in metadata (height, weight, age, gender) and save final .npz.
+    Once the final .npz is saved, delete the temporary folder to save space.
     """
     input_dir   = os.path.join(INPUT_ROOT, patient_id)
     signal_file = os.path.join(input_dir, "signals.npz")
@@ -48,7 +50,7 @@ def run_pipeline_for_patient(patient_id: str, metadata_df: pd.DataFrame):
     tmp_dir = os.path.join(TMP_ROOT, patient_id)
     os.makedirs(tmp_dir, exist_ok=True)
 
-    # Intermediate file paths
+    # Intermediate file paths (all under tmp_dir)
     path_strip  = os.path.join(tmp_dir, "step1_strip.npz")
     path_nans   = os.path.join(tmp_dir, "step2_nans.npz")
     path_ds50   = os.path.join(tmp_dir, "step3_ds50.npz")
@@ -108,7 +110,7 @@ def run_pipeline_for_patient(patient_id: str, metadata_df: pd.DataFrame):
         weight = float(row.get("weight", np.nan))
         age    = float(row.get("age", np.nan))
         gender = str(row.get("sex", ""))
-        bmi    = float(row.get("bmi",np.nan))
+        bmi    = float(row.get("bmi", np.nan))
 
         # Prepare final output directory
         patient_out_dir = os.path.join(OUTPUT_ROOT, patient_id)
@@ -132,11 +134,18 @@ def run_pipeline_for_patient(patient_id: str, metadata_df: pd.DataFrame):
             height=np.array([height], dtype=np.float32),
             weight=np.array([weight], dtype=np.float32),
             age=np.array([age], dtype=np.float32),
-            bmi = np.array([bmi],dtype=np.float32),
+            bmi=np.array([bmi], dtype=np.float32),
             gender=np.array([gender])
         )
 
-        print(f"[DONE] Patient {patient_id} → saved to '{final_output}'\n")
+        # ────────────────── CLEAN UP INTERMEDIATE FILES ──────────────────
+        # Remove the entire temporary directory for this patient now that final_output is saved
+        try:
+            shutil.rmtree(tmp_dir)
+        except Exception as rm_err:
+            print(f"[WARNING] Could not remove temp folder {tmp_dir}: {rm_err}")
+
+        print(f"[DONE] Patient {patient_id} → saved to '{final_output}' (temp files deleted)\n")
         return True
 
     except Exception as e:
