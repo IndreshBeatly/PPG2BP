@@ -1,9 +1,14 @@
 import torch
+print("torch.cuda.is_available():", torch.cuda.is_available())
+print("Device being used:")
+
 import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+print(torch.cuda.is_available())
+
 
 # Import your Dataset and Model classes (make sure these imports work relative to your file structure)
 from data_loader import PPG2BPDataset
