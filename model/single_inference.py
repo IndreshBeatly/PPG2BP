@@ -1,4 +1,5 @@
 import torch
+import os 
 import numpy as np
 from ppg2bpnet import PPG2BPNetOptimized
 
@@ -58,12 +59,28 @@ def single_inference(ppg_target_np: np.ndarray,
 
 
 if __name__ == "__main__":
-    # ───── Example usage ─────
-    # Replace these with your actual PPG data and calibration values:
-    ppg_target_np = np.random.randn(500).astype(np.float32)  # placeholder
-    ppg_calib_np  = np.random.randn(500).astype(np.float32)  # placeholder
-    sbp_calib_val = 120.0
-    dbp_calib_val = 80.0
+    
+    test_root = "data/final"
+    case_id = "5911"
+    npz_path = os.path.join(test_root,case_id,"signals_with_metadata.npz")
+
+    # load data
+    data = np.load(npz_path)
+    ppg_windows = data["ppg_windows"]
+    sbp_values = data["sbp_values"]
+    dbp_values = data["dbp_values"]
+
+    # calib window 
+    calib_index = 50
+    ppg_calib_np = ppg_windows[calib_index]
+    sbp_calib_val = float(sbp_values[calib_index])
+    dbp_calib_val = float(dbp_values[calib_index])
+
+    # target window
+    target_index = 8
+    ppg_target_np = ppg_windows[target_index]
+    target_sbp = float(sbp_values[target_index])
+    target_dbp = float(dbp_values[target_index])
 
     sbp_out, dbp_out = single_inference(
         ppg_target_np,
@@ -72,7 +89,6 @@ if __name__ == "__main__":
         dbp_calib_val,
         checkpoint_path="best_ppg2bp_net.pth"
     )
-
-    print("Single‐Sample Inference Result:")
-    print(f"  SBP_predicted = {sbp_out:.2f} mmHg")
-    print(f"  DBP_predicted = {dbp_out:.2f} mmHg")
+    print(f"Prediction for case '{case_id}', target_idx={target_index}:")
+    print(f"  True SBP = {target_sbp:.2f} mmHg, Predicted SBP = {sbp_out:.2f} mmHg")
+    print(f"  True DBP = {target_dbp:.2f} mmHg, Predicted DBP = {dbp_out:.2f} mmHg")
