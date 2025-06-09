@@ -2,6 +2,7 @@
 import argparse
 import numpy as np
 from typing import Tuple
+import neurokit2 as nk
 
 
 def find_peaks_with_min_distance(
@@ -43,16 +44,11 @@ def find_peaks_with_min_distance(
 
     return np.array(kept, dtype=int)
 
-
 def find_troughs_between_peaks(sig: np.ndarray, peak_idxs: np.ndarray) -> np.ndarray:
-    """
-    Given sorted peak indices, find the local minima (troughs) between each pair of consecutive peaks.
-    Returns trough indices.
-    """
     troughs = []
     for i in range(len(peak_idxs) - 1):
         start_idx = peak_idxs[i]
-        end_idx = peak_idxs[i + 1]
+        end_idx   = peak_idxs[i + 1]
         if end_idx - start_idx <= 1:
             continue
         segment = sig[start_idx:end_idx + 1]
@@ -61,42 +57,36 @@ def find_troughs_between_peaks(sig: np.ndarray, peak_idxs: np.ndarray) -> np.nda
         troughs.append(trough_idx)
     return np.array(troughs, dtype=int)
 
-
 def compute_sbp_dbp(
     abp_win: np.ndarray,
     fs: float
 ) -> Tuple[float, float]:
     """
-    Compute SBP and DBP for a single 10-second ABP strip:
-      - SBP = global maximum of abp_win
-      - DBP = median of local minima between consecutive systolic peaks
-              (falls back to abp_win.min() if fewer than two peaks detected)
+    SBP = mean of NeuroKit2-detected PPG_Peaks (fallback to global max)
+    DBP = median of NeuroKit2-detected PPG_Valleys (fallback to troughs, then global min)
     """
-    # SBP by simple global max
-    sbp = float(np.max(abp_win))
+    # 1) NeuroKit peak/valley detection
+    info = nk.ppg_findpeaks(abp_win, sampling_rate=fs, method="elgendi")
+    peak_idxs   = info.get("PPG_Peaks",   np.array([], dtype=int))
+    valley_idxs = info.get("PPG_Valleys", np.array([], dtype=int))
 
-    # DBP via local minima between beats
-    # 1) detect systolic peaks with a modest prominence
-    abp_range = float(np.nanmax(abp_win) - np.nanmin(abp_win))
-    min_prominence_abp = 0.05 * abp_range
-    min_dist_s = 0.3  # enforce at least 0.3 s between true peaks
-
-    peak_idxs = find_peaks_with_min_distance(abp_win, min_prominence_abp, fs, min_dist_s)
-    if peak_idxs.size < 2:
-        # fallback to global min if not enough peaks found
-        dbp = float(np.min(abp_win))
-        return sbp, dbp
-
-    # 2) find troughs between detected peaks
-    trough_idxs = find_troughs_between_peaks(abp_win, peak_idxs)
-    if trough_idxs.size == 0:
-        dbp = float(np.min(abp_win))
+    # 2) SBP
+    if peak_idxs.size > 0:
+        sbp = float(np.mean(abp_win[peak_idxs]))
     else:
-        trough_vals = abp_win[trough_idxs]
-        dbp = float(np.median(trough_vals))
+        sbp = float(np.max(abp_win))
+
+    # 3) DBP
+    if valley_idxs.size > 0:
+        dbp = float(np.median(abp_win[valley_idxs]))
+    else:
+        trough_idxs = find_troughs_between_peaks(abp_win, peak_idxs)
+        if trough_idxs.size > 0:
+            dbp = float(np.median(abp_win[trough_idxs]))
+        else:
+            dbp = float(np.min(abp_win))
 
     return sbp, dbp
-
 
 def sbp_dbp_labels(input_npz: str, output_npz: str) -> None:
     """
@@ -104,14 +94,7 @@ def sbp_dbp_labels(input_npz: str, output_npz: str) -> None:
       • ppg_windows  (shape = [N, window_samples])
       • abp_windows  (shape = [N, window_samples])
       • fs           (scalar)
-    For each i in [0..N-1]:
-      sbp_values[i] = max(abp_windows[i, :])
-      dbp_values[i] = median of local minima between peaks in abp_windows[i, :]
-    Save out a new .npz with:
-      • ppg_windows  (unchanged)
-      • sbp_values   (shape = [N,])
-      • dbp_values   (shape = [N,])
-      • fs           (scalar)
+    Compute SBP/DBP for each strip and save results.
     """
     data = np.load(input_npz)
     ppg_windows = data['ppg_windows']
@@ -119,13 +102,12 @@ def sbp_dbp_labels(input_npz: str, output_npz: str) -> None:
     fs = float(data['fs'])
     data.close()
 
-    N, window_samples = ppg_windows.shape
+    N,window_samples = ppg_windows.shape
     sbp_values = np.zeros((N,), dtype=np.float32)
     dbp_values = np.zeros((N,), dtype=np.float32)
 
     for i in range(N):
-        abp_strip = abp_windows[i, :]
-        sbp_i, dbp_i = compute_sbp_dbp(abp_strip, fs)
+        sbp_i, dbp_i = compute_sbp_dbp(abp_windows[i, :], fs)
         sbp_values[i] = sbp_i
         dbp_values[i] = dbp_i
 
@@ -140,7 +122,7 @@ def sbp_dbp_labels(input_npz: str, output_npz: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Compute SBP (global max) and DBP (median of local minima) for each ABP strip."
+        description="Compute SBP (mean of peaks) and DBP (median of valleys) for each ABP strip."
     )
     parser.add_argument(
         "input_npz",
@@ -153,6 +135,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     sbp_dbp_labels(args.input_npz, args.output_npz)
     print(f"Saved PPG windows with SBP/DBP labels to '{args.output_npz}'.")
-
-
-

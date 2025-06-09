@@ -13,7 +13,7 @@ from modules.bp_labels             import sbp_dbp_labels
 from modules.normalise             import filter_ppg_file  # band‐pass + normalize
 
 INPUT_ROOT    = "data/raw_api"
-OUTPUT_ROOT   = "data/final"
+OUTPUT_ROOT   = "data/final2"
 TMP_ROOT      = "tmp_pipeline"
 METADATA_CSV  = "data/metadata/vitaldb_metadata.csv"  # adjust as needed
 
